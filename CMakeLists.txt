@@ -1,28 +1,6 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.2)
+
 project(serial)
-
-# Find catkin
-find_package(catkin REQUIRED)
-
-if(APPLE)
-	find_library(IOKIT_LIBRARY IOKit)
-	find_library(FOUNDATION_LIBRARY Foundation)
-endif()
-
-if(UNIX AND NOT APPLE)
-    # If Linux, add rt and pthread
-    catkin_package(
-        LIBRARIES ${PROJECT_NAME}
-        INCLUDE_DIRS include
-        DEPENDS rt pthread
-    )
-else()
-    # Otherwise normal call
-    catkin_package(
-        LIBRARIES ${PROJECT_NAME}
-        INCLUDE_DIRS include
-    )
-endif()
 
 ## Sources
 set(serial_SRCS
@@ -47,32 +25,35 @@ endif()
 ## Add serial library
 add_library(${PROJECT_NAME} ${serial_SRCS})
 if(APPLE)
-	target_link_libraries(${PROJECT_NAME} ${FOUNDATION_LIBRARY} ${IOKIT_LIBRARY})
+	find_library(IOKIT_LIBRARY IOKit)
+	find_library(FOUNDATION_LIBRARY Foundation)
+	target_link_libraries(${PROJECT_NAME} PRIVATE ${FOUNDATION_LIBRARY} ${IOKIT_LIBRARY})
 elseif(UNIX)
-	target_link_libraries(${PROJECT_NAME} rt pthread)
+	target_link_libraries(${PROJECT_NAME} PRIVATE rt pthread)
 else()
 	target_link_libraries(${PROJECT_NAME} setupapi)
 endif()
 
-## Uncomment for example
-add_executable(serial_example examples/serial_example.cc)
-add_dependencies(serial_example ${PROJECT_NAME})
-target_link_libraries(serial_example ${PROJECT_NAME})
-
-## Include headers
-include_directories(include)
-
-## Install executable
-install(TARGETS ${PROJECT_NAME}
-    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+# Set header search path for build, and install
+target_include_directories(${PROJECT_NAME}
+  PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/gen>
+  PUBLIC $<INSTALL_INTERFACE:include>
 )
 
-## Install headers
-install(FILES include/serial/serial.h include/serial/v8stdint.h
-  DESTINATION ${CATKIN_GLOBAL_INCLUDE_DESTINATION}/serial)
+# Install library, and generate config module
+install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets RUNTIME DESTINATION bin ARCHIVE DESTINATION lib LIBRARY DESTINATION lib)
+install(DIRECTORY include/ DESTINATION include PATTERN "impl/*" EXCLUDE)
+install(EXPORT ${PROJECT_NAME}-targets NAMESPACE "::" DESTINATION share/cmake/${PROJECT_NAME} FILE ${PROJECT_NAME}-config.cmake)
+
+## Uncomment for example
+add_executable(serial_example examples/serial_example.cc)
+target_link_libraries(serial_example PRIVATE ${PROJECT_NAME})
 
 ## Tests
-if(CATKIN_ENABLE_TESTING)
+if(BUILD_TESTING)
+    if (NOT CMAKE_CROSSOMPILING)
+        enable_testing()
+    endif()
     add_subdirectory(tests)
 endif()
