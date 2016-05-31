@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.2)
 
 project(serial)
 
+# Enable debug postfix for all targets created in this project
+set(CMAKE_DEBUG_POSTFIX "_d")
+
 ## Sources
 set(serial_SRCS
     src/serial.cc
