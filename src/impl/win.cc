@@ -255,6 +255,8 @@ Serial::SerialImpl::reconfigurePort ()
     dcbSerialParams.fOutX = false;
     dcbSerialParams.fInX = false;
   }
+  dcbSerialParams.EofChar = 0;
+  dcbSerialParams.EvtChar = 0;
 
   // activate settings
   if (!SetCommState(fd_, &dcbSerialParams)){
@@ -306,7 +308,8 @@ Serial::SerialImpl::available ()
     return 0;
   }
   COMSTAT cs;
-  if (!ClearCommError(fd_, NULL, &cs)) {
+  DWORD errors;
+  if (!ClearCommError(fd_, &errors, &cs)) {
     stringstream ss;
     ss << "Error while checking status of the serial port: " << GetLastError();
     THROW (IOException, ss.str().c_str());
