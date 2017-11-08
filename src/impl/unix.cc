@@ -23,7 +23,7 @@
 # include <linux/serial.h>
 #endif
 
-#include <sys/select.h>
+#include <sys/poll.h>
 #include <sys/time.h>
 #include <time.h>
 #ifdef __MACH__
@@ -491,12 +491,12 @@ Serial::SerialImpl::available ()
 bool
 Serial::SerialImpl::waitReadable (uint32_t timeout)
 {
-  // Setup a select call to block for serial data or a timeout
-  fd_set readfds;
-  FD_ZERO (&readfds);
-  FD_SET (fd_, &readfds);
-  timespec timeout_ts (timespec_from_ms (timeout));
-  int r = pselect (fd_ + 1, &readfds, NULL, NULL, &timeout_ts, NULL);
+  // Setup a poll call to block for serial data or a timeout
+  timespec timeout_ts(timespec_from_ms(timeout));
+  struct pollfd pfd;
+  pfd.fd = fd_;
+  pfd.events = POLLIN;
+  int r = ppoll (&pfd, 1, &timeout_ts, NULL);
 
   if (r < 0) {
     // Select was interrupted
@@ -511,9 +511,9 @@ Serial::SerialImpl::waitReadable (uint32_t timeout)
     return false;
   }
   // This shouldn't happen, if r > 0 our fd has to be in the list!
-  if (!FD_ISSET (fd_, &readfds)) {
-    THROW (IOException, "select reports ready to read, but our fd isn't"
-           " in the list, this shouldn't happen!");
+  if (!(pfd.revents & POLLIN) || (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))) {
+    THROW(IOException, "ppoll reports ready to read, but our fd isn't"
+          " in the list, this shouldn't happen!");
   }
   // Data available to read.
   return true;
@@ -554,7 +554,7 @@ Serial::SerialImpl::read (uint8_t *buf, size_t size)
       // Timed out
       break;
     }
-    // Timeout for the next select is whichever is less of the remaining
+    // Timeout for the next ppoll is whichever is less of the remaining
     // total read timeout and the inter-byte timeout.
     uint32_t timeout = std::min(static_cast<uint32_t> (timeout_remaining_ms),
                                 timeout_.inter_byte_timeout);
@@ -570,10 +570,10 @@ Serial::SerialImpl::read (uint8_t *buf, size_t size)
         }
       }
       // This should be non-blocking returning only what is available now
-      //  Then returning so that select can block again.
+      //  Then returning so that ppoll can block again.
       ssize_t bytes_read_now =
         ::read (fd_, buf + bytes_read, size - bytes_read);
-      // read should always return some data as select reported it was
+      // read should always return some data as ppoll reported it was
       // ready to read when we get to this point.
       if (bytes_read_now < 1) {
         // Disconnected devices, at least on Linux, show the
@@ -609,7 +609,6 @@ Serial::SerialImpl::write (const uint8_t *data, size_t length)
   if (is_open_ == false) {
     throw PortNotOpenedException ("Serial::write");
   }
-  fd_set writefds;
   size_t bytes_written = 0;
 
   // Calculate total timeout in milliseconds t_c + (t_m * N)
@@ -625,13 +624,15 @@ Serial::SerialImpl::write (const uint8_t *data, size_t length)
     }
     timespec timeout(timespec_from_ms(timeout_remaining_ms));
 
-    FD_ZERO (&writefds);
-    FD_SET (fd_, &writefds);
+    struct pollfd pfd;
+    pfd.fd = fd_;
+    pfd.events = POLLOUT;
+    pfd.revents = 0;
 
-    // Do the select
-    int r = pselect (fd_ + 1, NULL, &writefds, NULL, &timeout, NULL);
+    // Do the poll
+    int r = ppoll(&pfd, 1, &timeout, NULL);
 
-    // Figure out what happened by looking at select's response 'r'
+    // Figure out what happened by looking at ppoll's response 'r'
     /** Error **/
     if (r < 0) {
       // Select was interrupted, try again
@@ -648,11 +649,11 @@ Serial::SerialImpl::write (const uint8_t *data, size_t length)
     /** Port ready to write **/
     if (r > 0) {
       // Make sure our file descriptor is in the ready to write list
-      if (FD_ISSET (fd_, &writefds)) {
+      if ((pfd.revents & POLLOUT) && !(pfd.revents& (POLLERR | POLLHUP | POLLNVAL))) {
         // This will write some
         ssize_t bytes_written_now =
           ::write (fd_, data + bytes_written, length - bytes_written);
-        // write should always return some data as select reported it was
+        // write should always return some data as poll reported it was
         // ready to write when we get to this point.
         if (bytes_written_now < 1) {
           // Disconnected devices, at least on Linux, show the
@@ -679,7 +680,7 @@ Serial::SerialImpl::write (const uint8_t *data, size_t length)
         }
       }
       // This shouldn't happen, if r > 0 our fd has to be in the list!
-      THROW (IOException, "select reports ready to write, but our fd isn't"
+      THROW (IOException, "ppoll reports ready to write, but our fd isn't"
                           " in the list, this shouldn't happen!");
     }
   }
